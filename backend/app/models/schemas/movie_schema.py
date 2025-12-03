@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from datetime import date, datetime
 from enum import Enum
+from app.core.validators import URLValidator, FieldValidators
 
 
 class MovieStatus(str, Enum):
@@ -23,6 +24,39 @@ class MovieBase(BaseModel):
     age_restriction: Optional[str] = None
     rating: float = Field(default=0.0, ge=0.0, le=10.0)
     status: MovieStatus = MovieStatus.NOW_PLAYING
+    
+    @field_validator('title')
+    @classmethod
+    def validate_title(cls, v):
+        return FieldValidators.validate_non_empty_string(v)
+    
+    @field_validator('duration')
+    @classmethod
+    def validate_duration(cls, v):
+        if v <= 0:
+            raise ValueError("Duration must be greater than 0 minutes")
+        if v > 1440:
+            raise ValueError("Duration cannot exceed 24 hours (1440 minutes)")
+        return v
+    
+    @field_validator('rating')
+    @classmethod
+    def validate_rating(cls, v):
+        return FieldValidators.validate_rating(v)
+    
+    @field_validator('poster_url')
+    @classmethod
+    def validate_poster_url(cls, v):
+        if v and len(v) > 0:
+            return URLValidator.validate_url(v)
+        return v
+    
+    @field_validator('trailer_url')
+    @classmethod
+    def validate_trailer_url(cls, v):
+        if v and len(v) > 0:
+            return URLValidator.validate_url(v)
+        return v
 
 
 class MovieCreate(MovieBase):

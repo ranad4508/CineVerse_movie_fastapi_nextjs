@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from app.db.session import init_db, SessionLocal
 from app.core.config import settings
 from app.core.firebase import init_firebase
@@ -8,6 +10,18 @@ from app.models.schemas.user_schema import UserCreate
 from app.models.domain.user import UserRole
 from app.api.router import api_router
 from app.core.firebase import create_firebase_user
+from app.core.security_middleware import (
+    SecurityHeadersMiddleware,
+    SpamDetectionMiddleware,
+    RequestTimeoutMiddleware,
+    RequestValidationMiddleware
+)
+from app.core.exception_handler import validation_exception_handler, generic_exception_handler
+import logging
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def init_admin_user():
@@ -51,6 +65,9 @@ def create_app():
         description="CineVerse - Movie Ticketing System API"
     )
     
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(Exception, generic_exception_handler)
+    
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[settings.FRONTEND_URL, "http://localhost:3000", "http://localhost:8000"],
@@ -58,6 +75,11 @@ def create_app():
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(RequestValidationMiddleware)
+    app.add_middleware(RequestTimeoutMiddleware)
+    app.add_middleware(SpamDetectionMiddleware)
     
     init_firebase()
     init_db()

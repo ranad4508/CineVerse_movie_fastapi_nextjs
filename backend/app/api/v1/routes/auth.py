@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from datetime import timedelta
 from app.db.session import get_db
@@ -6,18 +6,23 @@ from app.services.user_service import UserService
 from app.core.security import create_access_token
 from app.core.config import settings
 from app.core.firebase import create_firebase_user, verify_firebase_token, get_firebase_user_by_email
-from app.models.schemas.user_schema import UserCreate, UserResponse
+from app.models.schemas.user_schema import UserCreate, UserResponse, UserBase
 from app.models.domain.user import UserRole
-from pydantic import BaseModel, EmailStr
+from app.core.rate_limiter import get_rate_limit_key
+from app.core.validators import PasswordValidator
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from typing import Optional
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str
-    username: str
-    full_name: str = None
+class RegisterRequest(UserBase):
+    password: str = Field(..., min_length=8)
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password_strength(cls, v):
+        return PasswordValidator.validate_password(v)
 
 
 class LoginRequest(BaseModel):
@@ -36,7 +41,11 @@ class FirebaseTokenRequest(BaseModel):
 
 
 @router.post("/register", response_model=TokenResponse)
-def register(register_request: RegisterRequest, db: Session = Depends(get_db)):
+def register(
+    register_request: RegisterRequest,
+    db: Session = Depends(get_db),
+    rate_limit_key: str = Depends(get_rate_limit_key(calls=5, period=3600))
+):
     user_service = UserService(db)
     
     try:
@@ -57,7 +66,14 @@ def register(register_request: RegisterRequest, db: Session = Depends(get_db)):
         
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
-            data={"sub": user.id},
+            data={
+                "sub": user.id,
+                "email": user.email,
+                "username": user.username,
+                "full_name": user.full_name,
+                "role": user.role.value,
+                "is_active": user.is_active
+            },
             expires_delta=access_token_expires
         )
         
@@ -79,7 +95,11 @@ def register(register_request: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(login_request: LoginRequest, db: Session = Depends(get_db)):
+def login(
+    login_request: LoginRequest,
+    db: Session = Depends(get_db),
+    rate_limit_key: str = Depends(get_rate_limit_key(calls=10, period=900))
+):
     user_service = UserService(db)
     
     firebase_user = get_firebase_user_by_email(login_request.email)
@@ -104,7 +124,14 @@ def login(login_request: LoginRequest, db: Session = Depends(get_db)):
     
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.id},
+        data={
+            "sub": user.id,
+            "email": user.email,
+            "username": user.username,
+            "full_name": user.full_name,
+            "role": user.role.value,
+            "is_active": user.is_active
+        },
         expires_delta=access_token_expires
     )
     
@@ -116,7 +143,11 @@ def login(login_request: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/verify-firebase-token", response_model=TokenResponse)
-def verify_firebase_id_token(token_request: FirebaseTokenRequest, db: Session = Depends(get_db)):
+def verify_firebase_id_token(
+    token_request: FirebaseTokenRequest,
+    db: Session = Depends(get_db),
+    rate_limit_key: str = Depends(get_rate_limit_key(calls=10, period=300))
+):
     user_service = UserService(db)
     
     decoded_token = verify_firebase_token(token_request.id_token)
@@ -148,7 +179,14 @@ def verify_firebase_id_token(token_request: FirebaseTokenRequest, db: Session = 
     
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.id},
+        data={
+            "sub": user.id,
+            "email": user.email,
+            "username": user.username,
+            "full_name": user.full_name,
+            "role": user.role.value,
+            "is_active": user.is_active
+        },
         expires_delta=access_token_expires
     )
     
